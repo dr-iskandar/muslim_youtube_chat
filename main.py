@@ -5,24 +5,15 @@ import google.generativeai as genai
 import os
 import yt_dlp
 import tempfile
+import time
+import random
 
-def load_gemini_api_key():
-    try:
-        with open("license.txt", "r") as f:
-            api_key = f.readline().strip()
-        return api_key
-    except FileNotFoundError:
-        st.error("license.txt file not found. Please ensure it exists in the same directory as your script.")
-        return None
-    except Exception as e:
-       st.error(f"Error reading API key from license.txt: {e}")
-       return None
-
-gemini_api_key = load_gemini_api_key()
+# Load API Key from Streamlit secrets
+gemini_api_key = st.secrets['GEMINI_API_KEY']
 
 if gemini_api_key:
   genai.configure(api_key=gemini_api_key)
-  model = genai.GenerativeModel("gemini-1.5-flash")
+  model = genai.GenerativeModel('gemini-1.0-pro') #Changed to gemini-1.0-pro
 else:
   st.stop() #stop the app if API Key does not exist
 
@@ -56,13 +47,25 @@ def transcribe_video(url):
             st.success("Transcription completed!")
             return result["segments"]
 
-def generate_response(prompt):
-    try:
-        response = model.generate_content(prompt)
-        return response.text
-    except Exception as e:
-      st.error(f"Error when doing query to gemini {e}")
-      return None
+
+def generate_response(prompt, max_retries=3, initial_delay=1, max_delay=5):
+    retries = 0
+    delay = initial_delay
+    while retries <= max_retries:
+      try:
+          response = model.generate_content(prompt)
+          return response.text
+      except Exception as e:
+        if "500 An internal error has occurred." in str(e):
+          retries += 1
+          st.warning(f"Error when doing query to gemini: {e}. Retrying in {delay} seconds...")
+          time.sleep(delay)
+          delay = min(delay * 2, max_delay) + random.uniform(0, 1) #add some randomness
+        else:
+          st.error(f"Error when doing query to gemini: {e}")
+          return None
+    st.error("Maximum retries reached, cannot get response from Gemini API.")
+    return None
 
 st.title("Islamic YouTube Chat")
 
@@ -88,10 +91,10 @@ if youtube_url:
 
         chat_input = st.text_input("Enter your question")
         if chat_input:
-           prompt = f"Based on this transcript: {transcript} \nAnswer this question: {chat_input}"
-           with st.spinner('Generating response...'):
-              response = generate_response(prompt + " jawab pakai bahasa indonesia")
-              if response:
+            prompt = f"Based on this transcript: {transcript} \nAnswer this question: {chat_input}"
+            with st.spinner('Generating response...'):
+               response = generate_response(prompt)
+               if response:
                   st.write(f"**Answer**: {response}")
 
     else:
